@@ -1,0 +1,9 @@
+__pycache__/
+selftest_runs/
+selftest_analysis/
+runs_pilot/
+# large files: back these up to cloud storage instead of git
+runs/**/*.pt
+runs/**/damage_frames/
+runs/**/tb/
+checkpoints/buffer.pickle
