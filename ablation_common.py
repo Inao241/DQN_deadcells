@@ -274,6 +274,20 @@ StepResult = collections.namedtuple(
      "prev_boss_hp", "new_boss_hp", "damage_taken", "t_env", "t_capture", "boss_max_hp"],
 )
 
+# lib/env.py calls it a win as soon as the boss HP reads <= 1. A real kill always comes
+# from a low boss HP (one hit is ~0.2-0.6% of the boss's max), so a "win" straight from
+# above this fraction - or in the first 3 steps of an episode - is a failed boss HP read.
+GLITCH_WIN_MIN_PREV_BOSS_FRAC = 0.05
+
+
+def is_glitch_win(res, steps_so_far):
+    """True if this step's win is really a boss-HP read failure (don't learn from it)."""
+    if not res.win:
+        return False
+    if steps_so_far < 3:
+        return True
+    return res.prev_boss_hp > GLITCH_WIN_MIN_PREV_BOSS_FRAC * max(res.boss_max_hp or 1, 1)
+
 
 class GameSession:
     """Thin wrapper around the original env/screen/HP code that adds timing
@@ -346,6 +360,10 @@ class GameSession:
         new_state = self.screen.grab()
         t2 = time.perf_counter()
         win = bool(done and new_php > 1)
+        if done and not win and new_bhp <= 1:
+            # once the player is dead the boss pointer chain no longer resolves (reads 0);
+            # keep the last real value so boss_hp_frac_end isn't logged as "boss killed"
+            new_bhp = prev_bhp
         # if the game stores negative HP we keep the true overkill damage;
         # if it floors at 0, a fatal hit only shows the HP that was left
         damage = max(0, prev_php - new_php)

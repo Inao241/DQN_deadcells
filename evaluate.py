@@ -74,6 +74,8 @@ class _HumanSession:
         t2 = time.perf_counter()
         win = new_php > 1 and new_bhp <= 1
         done = win or new_php <= 1
+        if done and not win and new_bhp <= 1:
+            new_bhp = bhp  # boss pointer is gone after death: keep the last real value
         s.state, s.player_hp, s.boss_hp = new_state, new_php, new_bhp
         return C.StepResult(0.0, done, win, prev_state, new_state, php, new_php, bhp, new_bhp,
                             max(0, php - new_php), t1 - t0, t2 - t1, s.boss_max_hp)
@@ -132,7 +134,7 @@ def main(argv=None, session_factory=None, check_keys=None):
                 t_select = time.perf_counter() - t0
                 res = session.step(move, action)
                 global_step += 1
-                glitch = res.win and ep.steps < 3
+                glitch = C.is_glitch_win(res, ep.steps)
                 truncated = (not res.done) and (ep.steps + 1) >= args.max_episode_steps
                 dmg.observe(episode, ep, global_step, move, action, res, res.done and not res.win)
                 ep.add_step(move, action, res.reward, t_select, res.t_env, res.t_capture, 0.0, None)

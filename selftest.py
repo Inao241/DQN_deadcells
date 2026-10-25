@@ -15,6 +15,7 @@ _os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 import math
 import os
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -45,6 +46,8 @@ class FakeGame:
     def boss_hp(self):
         if self.glitch_reads > 0:
             return 1
+        if self.php <= 1 or self.kill_pending:
+            return 0  # real game: the boss pointer chain stops resolving once the player is dead
         return self.bhp
 
     def step(self, move, action):
@@ -131,6 +134,9 @@ def check(cond, msg):
 
 
 def main():
+    # start clean: leftover DONE runs from an earlier selftest would make every check below skip training
+    for d in ("selftest_runs", "selftest_analysis"):
+        shutil.rmtree(os.path.join(HERE, d), ignore_errors=True)
     install_fakes()
     import ablation_common as C
     import evaluate
@@ -199,6 +205,13 @@ def main():
     outcomes = {r["outcome"] for n in CONFIGS for r in read_csv(os.path.join(root, n, "seed0", "episodes.csv"))}
     check("loss" in outcomes, "losses recorded (%s)" % sorted(outcomes))
     check("glitch" in outcomes, "glitched episodes are detected and skipped")
+    all_rows = [r for n in CONFIGS for r in read_csv(os.path.join(root, n, "seed0", "episodes.csv"))]
+    check(all(float(r["boss_hp_frac_end"]) > 0 for r in all_rows if r["outcome"] == "loss"),
+          "losses keep the last real boss HP (boss pointer reads 0 after death)")
+    mk = lambda win, prev_b, steps: C.is_glitch_win(C.StepResult(
+        0, win, win, None, None, 100, 100, prev_b, 0, 0, 0, 0, BOSS_MAX), steps)
+    check(mk(True, 0.30 * BOSS_MAX, 200) and mk(True, BOSS_MAX, 1) and not mk(True, 0.02 * BOSS_MAX, 200)
+          and not mk(False, BOSS_MAX, 200), "a win straight from high boss HP counts as a glitch")
 
     code = train_ablation.main(["--run-dir", os.path.join(root, "dqn", "seed0"), "--no-resize-window"], check_keys=lambda: False)
     check(code == 0, "re-running a DONE run is skipped")

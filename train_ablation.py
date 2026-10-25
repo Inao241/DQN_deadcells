@@ -145,9 +145,9 @@ def main(argv=None, session_factory=None, check_keys=None):
             res = session.step(move, action)
             global_step += 1
 
-            # A "win" within the first 3 steps means the boss HP read failed
-            # (original code stopped training here). Don't learn from it.
-            glitch = res.win and ep.steps < 3
+            # A "win" in the first 3 steps, or straight from a high boss HP, means the boss
+            # HP read failed (original code stopped training here). Don't learn from it.
+            glitch = C.is_glitch_win(res, ep.steps)
             truncated = (not res.done) and (ep.steps + 1) >= args.max_episode_steps
 
             if not glitch:
