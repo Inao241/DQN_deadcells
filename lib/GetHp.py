@@ -9,6 +9,12 @@ Kernel32 = ctypes.WinDLL("kernel32.dll")
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 
+# libhl.dll 里的静态指针。游戏更新后 base 从 libhl+0x48184 移到了 libhl+0x49184，
+# 中间各层 offset 没变（2026-10-25 用 probe_hp_chains.py 验证）
+HP_BASE_OFFSET = 0x00049184
+PLAYER_HP_CHAIN = [0x4B0, 0x0, 0x58, 0x68, 0x12C]   # 掉血、新开一局、进 boss 房都稳定
+BOSS_HP_CHAIN = [0x6B8, 0x0, 0x18, 0x11C, 0x12C]    # 只在 boss 房里有效，房外读到 0
+
 def EnumProcessModulesEx(hProcess):
     buf_count = 256
     while True:
@@ -51,8 +57,10 @@ class Hp_getter:
 
     def read(self, base, offsets):
         # Traverse pointer chain: start at base and follow each offset.
+        # 任何一层读失败或遇到空指针都返回 0。原来失败时 addr 会保留上一层的指针值，
+        # 被当成 HP 返回（一个很大的非零数），会让 reset 误以为已经在 boss 房里。
         addr = ctypes.c_long()
-        self.kernal32.ReadProcessMemory(
+        ok = self.kernal32.ReadProcessMemory(
             int(self.process_handle),
             base,
             ctypes.byref(addr),
@@ -60,24 +68,28 @@ class Hp_getter:
             None,
         )
         for offset in offsets:
-            self.kernal32.ReadProcessMemory(
+            if not ok or addr.value == 0:
+                return ctypes.c_long(0)
+            ok = self.kernal32.ReadProcessMemory(
                 int(self.process_handle),
-                addr.value + offset,
+                (addr.value & 0xFFFFFFFF) + offset,
                 ctypes.byref(addr),
                 4,
                 None,
             )
+        if not ok:
+            return ctypes.c_long(0)
         return addr
 
     def get_self_hp(self):
-        base_address = self.libhl + 0x00048184
-        offsets = [0x4B0, 0x0, 0x58, 0x68, 0x12C]
+        base_address = self.libhl + HP_BASE_OFFSET
+        offsets = PLAYER_HP_CHAIN
         addr = self.read(base_address, offsets)
         return addr.value
 
     def get_boss_hp(self):
-        base_address = self.libhl + 0x00048184
-        offsets = [0x6B8, 0x0, 0x18, 0x11C, 0x12C]
+        base_address = self.libhl + HP_BASE_OFFSET
+        offsets = BOSS_HP_CHAIN
         addr = self.read(base_address, offsets)
         return addr.value
 
@@ -117,13 +129,13 @@ class Hp_getter:
         return False
 
     def set_self_hp(self, new_hp):
-        base_address = self.libhl + 0x00048184
-        offsets = [0x4B0, 0x0, 0x58, 0x68, 0x12C]
+        base_address = self.libhl + HP_BASE_OFFSET
+        offsets = PLAYER_HP_CHAIN
         return self.write(base_address, offsets, new_hp)
 
     def set_boss_hp(self, new_hp):
-        base_address = self.libhl + 0x00048184
-        offsets = [0x6B8, 0x0, 0x18, 0x11C, 0x12C]
+        base_address = self.libhl + HP_BASE_OFFSET
+        offsets = BOSS_HP_CHAIN
         return self.write(base_address, offsets, new_hp)
 
 if __name__=='__main__':

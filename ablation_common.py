@@ -26,8 +26,8 @@ import torch.nn.functional as F
 
 from model import DQN_action, DQN_move
 
-BOSS_MAX_HP = 234930
-PLAYER_MAX_HP = 15482
+# Max HP is not hardcoded: GameSession.reset() takes the HP read right after entering
+# the boss room as the max for that episode (player HP is set by hand, so it can change).
 N_MOVES = 3
 N_ACTIONS = 5
 # Index order must match lib/Actions.py
@@ -271,7 +271,7 @@ class Learner:
 StepResult = collections.namedtuple(
     "StepResult",
     ["reward", "done", "win", "prev_state", "new_state", "prev_player_hp", "new_player_hp",
-     "prev_boss_hp", "new_boss_hp", "damage_taken", "t_env", "t_capture"],
+     "prev_boss_hp", "new_boss_hp", "damage_taken", "t_env", "t_capture", "boss_max_hp"],
 )
 
 
@@ -301,6 +301,13 @@ class GameSession:
         self.state = None
         self.player_hp = None
         self.boss_hp = None
+        self.player_max_hp = None
+        self.boss_max_hp = None
+
+    def record_max_hp(self):
+        """Call right after reset: the HP at the start of the fight is this episode's max."""
+        self.player_max_hp = max(self.player_hp, 1)
+        self.boss_max_hp = max(self.boss_hp, 1)
 
     def reset(self, max_recover=3):
         self.env._reset()
@@ -320,15 +327,16 @@ class GameSession:
             self.env._reset()
         self.player_hp = self.hp.get_self_hp()
         self.boss_hp = self.hp.get_boss_hp()
+        self.record_max_hp()
         self.state = self.screen.grab()
 
     @property
     def boss_frac(self):
-        return self.boss_hp / BOSS_MAX_HP
+        return self.boss_hp / self.boss_max_hp
 
     @property
     def player_frac(self):
-        return self.player_hp / PLAYER_MAX_HP
+        return self.player_hp / self.player_max_hp
 
     def step(self, move, action):
         prev_state, prev_php, prev_bhp = self.state, self.player_hp, self.boss_hp
@@ -343,7 +351,7 @@ class GameSession:
         damage = max(0, prev_php - new_php)
         self.state, self.player_hp, self.boss_hp = new_state, new_php, new_bhp
         return StepResult(reward, bool(done), win, prev_state, new_state, prev_php, new_php,
-                          prev_bhp, new_bhp, damage, t1 - t0, t2 - t1)
+                          prev_bhp, new_bhp, damage, t1 - t0, t2 - t1, self.boss_max_hp)
 
     def force_end_episode(self, timeout=40.0):
         """Used for truncated / glitched episodes: drop the player to 1 HP and
@@ -363,6 +371,7 @@ class GameSession:
 EPISODE_FIELDS = (
     ["episode", "global_step", "steps", "outcome", "win", "return",
      "boss_hp_end", "boss_hp_frac_end", "player_hp_end", "player_hp_frac_end",
+     "boss_hp_max", "player_hp_max",
      "epsilon", "duration_s", "n_hits", "damage_taken",
      "mean_select_ms", "mean_env_ms", "mean_capture_ms", "mean_train_ms",
      "mean_step_ms", "p95_step_ms", "train_updates", "mean_loss_move", "mean_loss_action"]
@@ -411,9 +420,10 @@ class EpisodeStats:
         r = dict(
             episode=episode, global_step=global_step, steps=self.steps, outcome=outcome,
             win=int(outcome == "win"), **{"return": round(self.ret, 4)},
-            boss_hp_end=session.boss_hp, boss_hp_frac_end=round(max(session.boss_hp, 0) / BOSS_MAX_HP, 5),
+            boss_hp_end=session.boss_hp, boss_hp_frac_end=round(max(session.boss_hp, 0) / session.boss_max_hp, 5),
             player_hp_end=session.player_hp,
-            player_hp_frac_end=round(max(session.player_hp, 0) / PLAYER_MAX_HP, 5),
+            player_hp_frac_end=round(max(session.player_hp, 0) / session.player_max_hp, 5),
+            boss_hp_max=session.boss_max_hp, player_hp_max=session.player_max_hp,
             epsilon=round(epsilon, 5), duration_s=round(time.time() - self.t_start, 2),
             n_hits=self.n_hits, damage_taken=self.damage,
             mean_select_ms=round(1000 * self.t["select"] / n, 3),
@@ -482,7 +492,7 @@ class DamageRecorder:
             t_in_episode_s=round(time.time() - ep_stats.t_start, 3), global_step=global_step,
             damage=res.damage_taken, fatal=int(fatal),
             player_hp_before=res.prev_player_hp, player_hp_after=res.new_player_hp,
-            boss_hp_frac=round(max(res.prev_boss_hp, 0) / BOSS_MAX_HP, 5),
+            boss_hp_frac=round(max(res.prev_boss_hp, 0) / res.boss_max_hp, 5),
             action=ACTION_NAMES[action], move=MOVE_NAMES[move],
             prev_actions="|".join(ACTION_NAMES[a] for a in prev_actions),
             defended_recent=int(any(a in DEFENSIVE_ACTIONS for a in window)),

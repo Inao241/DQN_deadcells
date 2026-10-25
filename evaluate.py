@@ -60,6 +60,7 @@ class _HumanSession:
         input("\nPress Enter when you are in the boss room and ready to fight...")
         s = self.inner
         s.player_hp, s.boss_hp = s.hp.get_self_hp(), s.hp.get_boss_hp()
+        s.record_max_hp()
         s.state = s.screen.grab()
 
     def step(self, move, action):
@@ -75,7 +76,7 @@ class _HumanSession:
         done = win or new_php <= 1
         s.state, s.player_hp, s.boss_hp = new_state, new_php, new_bhp
         return C.StepResult(0.0, done, win, prev_state, new_state, php, new_php, bhp, new_bhp,
-                            max(0, php - new_php), t1 - t0, t2 - t1)
+                            max(0, php - new_php), t1 - t0, t2 - t1, s.boss_max_hp)
 
     def force_end_episode(self):
         pass
