@@ -41,6 +41,7 @@ def build_parser():
     p.add_argument("--no-frames", action="store_true", help="do not save damage frames")
     p.add_argument("--game-speed", type=float, default=None,
                    help="default: the speed the run was trained at (2.0 for --random), 1.0 for --human; 0 = don't touch")
+    C.add_guard_args(p)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-resize-window", action="store_true")
     return p
@@ -115,10 +116,13 @@ def main(argv=None, session_factory=None, check_keys=None):
     if agent_kind == "human":
         session = _HumanSession(session, args.human_poll_s)
 
+    guard = C.RunGuard(args.expect_player_hp, 0 if agent_kind == "human" else args.preflight_s,
+                       max_glitches=args.max_glitches)
     wins, global_step, code = 0, 0, 0
     try:
         for episode in range(args.episodes):
             session.reset()
+            guard.after_reset(getattr(session, "inner", session))  # human: write through to the real session
             ep = C.EpisodeStats()
             dmg.new_episode()
             while True:
@@ -146,6 +150,7 @@ def main(argv=None, session_factory=None, check_keys=None):
             row = ep.row(episode, global_step, outcome, session, args.eps if agent_kind == "model" else 1.0)
             row.update(agent=agent_kind, checkpoint=args.checkpoint if learner else "")
             ep_log.write(row)
+            guard.check_episode(outcome, ep.steps)
             print("eval episode %d/%d: %s, boss HP left %.1f%%, hits %d" % (
                 episode + 1, args.episodes, outcome, 100 * session.boss_frac, ep.n_hits))
             if glitch or truncated:

@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/b4ff9013-e671-46fb-b28b-3aae9bbb224a
 # Environment
 - windows11
 - Python 3.9.21
-- python library: find in requirments.txt
+- python library: see requirements.txt (Anaconda env "DQN": double-click SETUP_env.bat)
 - Dead Cells
 - CUDA and cudnn for pytorch
 - Cheat Engine for 2x game speed

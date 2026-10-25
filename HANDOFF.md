@@ -1,6 +1,6 @@
 # DQN_deadcells → Workshop Paper：Project 交接总结
 
-> 更新于 2026-10-25 凌晨 1:55（2x 和 boss HP 已人工确认；第一次试跑只跑了 1 局多，发现并修了两个记录 bug；准备用 `TEST3_pilot.bat` 重跑 3000 步试跑）。作者：Michael Jin（UC Irvine）。仓库：github.com/Inao241/DQN_deadcells，本地 `C:\code\DQN_deadcell\DQN_deadcells`，工作分支 **`paper-experiments`**。
+> 更新于 2026-10-25 凌晨 2:20（3000 步试跑通过，80k 步一次约 2.8 h；已加 RunGuard（preflight + 训练中自动 abort），⏳ 待 `TEST4_guard.bat` 验证。之后就跑完整队列）。作者：Michael Jin（UC Irvine）。仓库：github.com/Inao241/DQN_deadcells，本地 `C:\code\DQN_deadcell\DQN_deadcells`，工作分支 **`paper-experiments`**。
 
 ## 1. 目标与背景
 
@@ -54,6 +54,13 @@
 | `EXPERIMENTS.md`、`HANDOFF.md` | 使用说明、仓库内交接文档 |
 | `TEST1_env.bat`、`TEST2_speed.bat` | 测试脚本（会自动激活 `DQN` 环境），双击运行，输出到 `test_logs/` |
 | `TEST3_pilot.bat` | 先跑 selftest（结果在 `test_logs/selftest.txt`，没通过就停），再跑 3000 步试跑到 `runs_pilot/pilot3000`。中途停止要按住 `q`，不要直接关窗口（否则什么都不保存） |
+| `TEST4_guard.bat` | 先跑 selftest，再在真游戏上跑 300 步（`--expect-player-hp 15482`，存到 `runs_pilot/guard300`），确认 preflight 能通过。最后显示 exit code（0 = 正常，3 = RunGuard 或游戏错误） |
+
+**RunGuard（`ablation_common.py`，2026-10-25 新增，train 和 evaluate 都用）**：防止游戏更新导致 offset 变化后白跑一晚、产出看似正常的垃圾数据。任何一项失败都抛 `RuntimeError`，脚本保存已有数据并以 exit code 3 退出，`run_experiments.py` 停止队列（修好后重跑同一命令即可接着跑）。
+- 每次 reset 后：玩家 HP 要在 500–1e6、boss HP 要在 1e4–1e7 之间，且玩家满血要和本 run 第一局（或 `--expect-player-hp`）一致，误差 1% 以内。读数不对先重读 5 次（每次间隔 0.2 s）；连续 3 局 reset 都不对就停。
+- 第一次正常 reset 后做 1 s preflight（`--preflight-s`）：不按键，每 0.1 s 读一次 HP，必须一直在 (1, max] 之间。human baseline 不做 preflight。
+- 每局结束：连续 5 局在 20 步内输或赢就停（死亡/胜利检测坏了）；最近 10 局里 glitch 达到 3 次就停（`--max-glitches`）。
+- `run_experiments.py` 新增 `--expect-player-hp`，会传给 train 和 evaluate。
 
 `model.py`：增加了 `dueling=True/False` 参数（默认 True，旧 checkpoint 仍能加载）。
 
@@ -80,8 +87,8 @@
 - **Double DQN 有 bug**：原代码用 `net(state)` 在当前状态 $s$ 上选 $a'$，正确做法是 $a' = \arg\max_a Q_{online}(s', a)$。已修复，selftest 会数值验证 target 公式。
 - move head 在 $s'$ 的 target 改为以"$s'$ 上策略会选的 action"为条件（原来用的是 $s$ 上执行的 action）。
 - PER 两个 head 用同一个 priority 公式；第一帧在 reset 之后再截取。
-- **glitch 胜利**：`lib/env.py` 只要 boss HP 读到 ≤ 1 就判胜（+100）。现在 `C.is_glitch_win()` 把两种情况记为 `glitch`、不用于学习并强制结束这一局：开局 3 步内的胜利，以及**上一步 boss HP 还高于 5% 就直接"胜利"**（一刀只打 0.2–0.6%，真击杀一定从很低的血量开始，所以这只能是读取失败）。train 和 evaluate 都用这个判断（2026-10-25 新增，⏳ 待 selftest 确认）。
-- **死亡时 boss HP 记录**：玩家死后 boss 链读出 0，原来 `episodes.csv` 会把这一局记成 `boss_hp_end = 0`（看起来像 boss 被打死），而 boss 剩余血量是比较各 config 的主要连续指标。现在死亡那一步保留上一步的真实 boss HP（`GameSession.step` 和 human baseline 都改了；reward 不受影响）。（2026-10-25 新增，⏳ 待 selftest 确认）
+- **glitch 胜利**：`lib/env.py` 只要 boss HP 读到 ≤ 1 就判胜（+100）。现在 `C.is_glitch_win()` 把两种情况记为 `glitch`、不用于学习并强制结束这一局：开局 3 步内的胜利，以及**上一步 boss HP 还高于 5% 就直接"胜利"**（一刀只打 0.2–0.6%，真击杀一定从很低的血量开始，所以这只能是读取失败）。train 和 evaluate 都用这个判断（2026-10-25 新增，selftest 通过）。
+- **死亡时 boss HP 记录**：玩家死后 boss 链读出 0，原来 `episodes.csv` 会把这一局记成 `boss_hp_end = 0`（看起来像 boss 被打死），而 boss 剩余血量是比较各 config 的主要连续指标。现在死亡那一步保留上一步的真实 boss HP（`GameSession.step` 和 human baseline 都改了；reward 不受影响）。（2026-10-25 新增，selftest 和试跑都确认）
 - 窗口匹配：`getWindowsWithTitle` 是子串匹配，会选到 `...\Dead Cells\deadcells.exe` 窗口，已改为精确匹配。
 - **旧结果（100% 通关、350 局赢 56 次）来自有 bug 的版本，不要再引用。**
 
@@ -90,7 +97,8 @@
 - seed：0、1、2（按 seed 顺序跑，没跑完也有完整的对比）
 - 每次训练 **80k 步**。依据：旧 checkpoint 的训练记录显示约 4 万步开始稳定获胜，约 10 万步后趋于平稳（来自有 bug 的旧版本，试跑后再确认）
 - 评估：`final.pt`，greedy，每个 seed 20 局；另有 random baseline 和 human baseline（你自己打 20 局，1x 速度）
-- 命令：`python run_experiments.py --plan`，然后 `python run_experiments.py --max-steps 80000 --seeds 0 1 2`，最后 `python analyze.py && python analyze_damage.py`
+- 命令：`python run_experiments.py --plan`，然后 `python run_experiments.py --max-steps 80000 --seeds 0 1 2 --expect-player-hp 15482`，最后 `python analyze.py && python analyze_damage.py`
+- 时间：每个 80k 步 run 约 2.8 h，12 个 run 约 34 h，加上 13 次 × 20 局 eval
 
 ## 4. 电脑环境
 
@@ -107,28 +115,38 @@
 
 | 项目 | 状态 |
 |---|---|
-| selftest（GPU） | ✅ 之前通过（一次训练更新约 15.7 ms）。⏳ 10-25 改了 glitch 判断和死亡时 boss HP 记录，新增 2 项检查，需要再跑（`TEST3_pilot.bat` 第一步会跑） |
-| 读玩家 HP | ✅ base `0x49184`，B 组链稳定，满血 15482 |
-| 读 boss HP | ✅ 人工确认进房后读数正常；训练脚本里读到满血 205238，挨打下降。玩家死后读出 0（已在记录里处理） |
+| selftest（GPU） | ✅ 10-25 改完 glitch 判断和死亡时 boss HP 记录后重跑通过（含新增 2 项检查）。⏳ 加 RunGuard 后又新增 7 项检查，需要再跑（`TEST4_guard.bat` 第一步）。RunGuard 的判断逻辑已单独测过（不需要 torch 的部分） |
+| RunGuard 真机 | ⏳ 未测：`TEST4_guard.bat` 第二步，应看到 `preflight OK` 且 exit code 0 |
+| 读玩家 HP | ✅ base `0x49184`，B 组链稳定，每局满血都是 15482 |
+| 读 boss HP | ✅ 进房后读数正常、挨打下降；玩家死后读出 0（已在记录里处理）。boss 满血每局不同，见下 |
 | 2x 加速 | ✅ TEST2 跑通，已目测确认是 2 倍速；`--detect` 能找回已开的加速，重跑不用重启游戏 |
 | 窗口匹配 bug | ✅ 已修复 |
-| reset 流程 | ✅ 第一次试跑里死亡 → reset → 回 boss 房成功 1 次（第 0 局 → 第 1 局）。⏳ 还需要在完整试跑里连续多局确认 |
-| 3000 步试跑 | ⏳ 第一次（`runs_pilot/speed`，10-25 01:37）只跑了第 0 局和第 1 局约 255 步，进程被直接结束，没有 `summary.json` 和 checkpoint；那份数据的 `boss_hp_end` 有上面那个 bug，不用。下一次用 `TEST3_pilot.bat` 跑到 `runs_pilot/pilot3000` |
+| reset 流程 | ✅ 试跑里连续 5 次死亡 → reset → 回 boss 房都成功 |
+| 3000 步试跑 | ✅ `runs_pilot/pilot3000`（10-25 约 01:55）：`stop_reason: budget`，6 局全输（ε 0.90→0.67，基本随机），没有 glitch，`final.pt`、`DONE` 都正常生成 |
 
-**第一次试跑的部分数据（第 0 局，ε≈0.86，基本是随机动作）**：468 步、43.7 s、输，打掉 boss 约 3.8%，被打 20 次。每步平均 93 ms（p95 107 ms），其中 env（按键 + 读 HP）70.5 ms、截屏 18.3 ms、训练 3.4 ms、选动作 0.9 ms。reset 里的 sleep 合计约 18 s。粗估一局约 62 s / 470 步，80k 步 ≈ 2.9 h（⏳ 以完整试跑的 `summary.json` 为准；agent 变强后每局更长，reset 占比会下降）。死亡时玩家 HP 停在 **1**（不是 0），致命一击的伤害值总是被截断。
+**试跑结果（`runs_pilot/pilot3000`）**：
+- 3101 步 / 6 局，`wall_time_h` = 0.109 → **80k 步一次约 2.8 h，12 个 run 约 34 h**（不含 eval）。agent 变强后每局更长，reset 占比会下降。
+- 每局 392–797 步、36–73 s；每次 reset 约 18 s。
+- 每步平均 91 ms（p95 106 ms）：env（按键 + 读 HP）73 ms、截屏 14 ms、训练 3 ms。
+- 输的局 `boss_hp_frac_end` 0.935–0.972（随机策略打掉 boss 3–6.5%），记录 bug 已修好。
+- loss 在下降（action head 8.4 → 4.2，move head 7.3 → 2.8）。
+- **boss 满血每局不同**：208878、235386、227536、231860、229697、247331（第一次试跑 205238），局内稳定（第一次挨打前 frac 都是 1.0）。⏳ 原因未知（游戏本身的随机性？），已问作者。因为按每局 max 归一化，`boss_hp_frac` 指标不受影响；但 reward 按绝对伤害算，boss 血多的局更难赢。论文里要作为环境随机性写明，并报告 `boss_hp_max` 的分布。
+- **玩家受伤值都是约 76.6 的整数倍**：153（2×）、689/766/843（9–11×）、996/1073/1149（13–15×）。相邻值可能是同一招的伤害浮动，`analyze_damage.py` 聚类时要看截图确认，别把一招拆成三类。
+- 死亡时玩家 HP 停在 **1**，致命一击的伤害值总是被截断（记录的是剩余血量 71–284）。
+- 第一次不完整的试跑在 `runs_pilot/speed`（只跑了 1 局多、进程被直接结束、`boss_hp_end` 有 bug），不用。
 
 ## 6. 下一步（按顺序）
 
-1. **跑完整试跑**：游戏开着、状态和上次试跑开始时一样，双击 `TEST3_pilot.bat`，看到提示后点一下 Dead Cells 窗口。约 1 分钟 selftest + 约 7 分钟试跑。检查：selftest 通过；多局都能正常 reset；每局 `player_hp_max` = 15482、`boss_hp_max` = 205238；输的局 `boss_hp_frac_end` 不是 0；有没有 `glitch`；`summary.json` 的 `wall_time_h` × 80000/3000 ≈ 每次训练小时数
-2. （建议）在 `train_ablation.py` 开头加 **preflight check**：读 3 秒 HP，玩家 HP 不合理或 boss HP 异常就直接退出；训练中连续 N 局 1–3 步就结束、或 glitch 太多则自动 abort。防止以后游戏更新导致 offset 再变时白跑一晚
-3. **跑完整队列**，数据备份到云盘（上次换电脑丢过数据）。跑的期间写 Direction C 的 delay injection（`evaluate.py` 加 `--action-delay`）
+1. ~~3000 步试跑~~ ✅ 已完成（见第 5 节）。⏳ 弄清 boss 满血为什么每局不同
+2. ~~preflight check~~ 已写成 RunGuard（见第 3 节）。⏳ 双击 `TEST4_guard.bat` 验证：selftest 通过、真游戏上出现 `preflight OK`、exit code 0
+3. **跑完整队列**：`python run_experiments.py --max-steps 80000 --seeds 0 1 2 --expect-player-hp 15482`（约 34 h + eval）。数据备份到云盘（上次换电脑丢过数据）。跑的期间写 Direction C 的 delay injection（`evaluate.py` 加 `--action-delay`）
 4. 跑 `analyze.py`、`analyze_damage.py`；看 `analysis/damage_clusters/` 里的截图，在 `attack_labels.json` 里给 boss 招式命名后再跑一次
 5. **写作**：Intro、Related Work、Environment、Setup 可以边跑实验边写；初稿交给 Pengcheng 改。用 Overleaf + AAAI LaTeX 模板
 
 ## 7. Git 状态
 
 - 已 commit：`10dfaaf Fix HP pointer base, read max HP at reset, add chain probe`。**还没 push**，需要自己在终端运行 `git push -u origin paper-experiments`
-- **未 commit（应该 commit）**：speedhack 相关（`speedhack.py`、`speedhack_dll/dqn_speedhack.lua`、`train.py`/`run.py` 的 `GAME_SPEED`）、`EXPERIMENTS.md`、`HANDOFF.md`、`README.md`、`selftest.py`、`SETUP_env.bat`、`requirements.txt`、`TEST1_env.bat`、`TEST2_speed.bat`；10-25 新改的 `ablation_common.py`、`train_ablation.py`、`evaluate.py`、`TEST3_pilot.bat`（建议等 selftest 通过后再 commit）
+- **未 commit（应该 commit）**：speedhack 相关（`speedhack.py`、`speedhack_dll/dqn_speedhack.lua`、`train.py`/`run.py` 的 `GAME_SPEED`）、`EXPERIMENTS.md`、`HANDOFF.md`、`README.md`、`selftest.py`、`SETUP_env.bat`、`requirements.txt`、`TEST1_env.bat`、`TEST2_speed.bat`；10-25 新改的 `ablation_common.py`、`train_ablation.py`、`evaluate.py`、`run_experiments.py`、`selftest.py`、`EXPERIMENTS.md`、`TEST3_pilot.bat`、`TEST4_guard.bat`（等 `TEST4_guard.bat` 通过后再 commit）
 - 不要 commit：`lib/Actions.py`、`lib/SendKey.py`、`run.py`/`train.py` 中只有行尾符（CRLF/LF）的差异；`__pycache__/*.pyc`；`_to_delete/`；`runs_pilot/`
 - ⏳ `git status` 显示旧的 `checkpoints/*.pt`、`*.npy`（被 git 跟踪的旧版本模型）已从磁盘删掉，`checkpoints/` 文件夹不存在了。如果是有意删的，可以 commit 这个删除；否则用 `git checkout -- checkpoints` 恢复
 - 可清理：`speedhack_dll/` 里旧的 `dqn_speedhack32/64.dll`（已不用）；CE `autorun\` 里一个 0 字节的 `.wtest` 文件；`runs_pilot/speed`（第一次不完整的试跑）

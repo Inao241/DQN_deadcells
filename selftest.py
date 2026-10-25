@@ -193,7 +193,8 @@ def main():
         code = train_ablation.main(
             ["--run-dir", d, "--double", str(double), "--per", str(per), "--dueling", str(dueling), "--seed", "0",
              "--max-steps", "400", "--batch-size", "32", "--capacity", "400", "--max-episode-steps", "120",
-             "--damage-frame-prob", "0.1", "--no-resize-window", "--device", DEVICE, "--save-every", "2"],
+             "--damage-frame-prob", "0.1", "--no-resize-window", "--device", DEVICE, "--save-every", "2",
+             "--max-glitches", "1000"],  # the fake game glitches often on purpose; RunGuard is tested below
             check_keys=lambda: False)
         t_cfg[name] = time.time() - t0
         rows = read_csv(os.path.join(d, "episodes.csv"))
@@ -212,6 +213,44 @@ def main():
         0, win, win, None, None, 100, 100, prev_b, 0, 0, 0, 0, BOSS_MAX), steps)
     check(mk(True, 0.30 * BOSS_MAX, 200) and mk(True, BOSS_MAX, 1) and not mk(True, 0.02 * BOSS_MAX, 200)
           and not mk(False, BOSS_MAX, 200), "a win straight from high boss HP counts as a glitch")
+
+    def raises(f):
+        try:
+            f()
+        except RuntimeError:
+            return True
+        return False
+
+    def guard_episodes(outcomes_steps, **kw):
+        g = C.RunGuard(preflight_s=0, **kw)
+        return lambda: [g.check_episode(o, s) for o, s in outcomes_steps]
+    normal = ([("loss", 400)] * 4 + [("glitch", 1)] + [("loss", 400)] * 5 + [("glitch", 2)]
+              + [("loss", 5), ("win", 600), ("truncated", 5000)] + [("loss", 400)] * 8)
+    check(not raises(guard_episodes(normal)), "RunGuard: normal episodes pass (2 glitches per 10, one short death)")
+    check(raises(guard_episodes([("loss", 3)] * 5)), "RunGuard: 5 instant deaths in a row stop the run")
+    check(raises(guard_episodes([("glitch", 1), ("loss", 400)] * 2 + [("glitch", 1)])),
+          "RunGuard: 3 glitches in 10 episodes stop the run")
+
+    class _HpReader:
+        def __init__(self, p, b):
+            self.p, self.b = p, b
+        def get_self_hp(self):
+            return self.p
+        def get_boss_hp(self):
+            return self.b
+    def fake_session(p, b, read_p=None, read_b=None):
+        return types.SimpleNamespace(player_max_hp=p, boss_max_hp=b, player_hp=p, boss_hp=b,
+                                     hp=_HpReader(p if read_p is None else read_p, b if read_b is None else read_b),
+                                     screen=types.SimpleNamespace(grab=lambda: None), state=None)
+    g = C.RunGuard(preflight_s=0.2)
+    check(g.after_reset(fake_session(PLAYER_MAX, BOSS_MAX)) and g.preflight_done, "RunGuard: good reset + preflight pass")
+    check(raises(lambda: C.RunGuard(preflight_s=0.2).after_reset(fake_session(PLAYER_MAX, BOSS_MAX, read_b=0))),
+          "RunGuard: preflight stops when the boss HP reads 0 while idle")
+    g = C.RunGuard(preflight_s=0, expect_player_hp=PLAYER_MAX)
+    check(not g.after_reset(fake_session(1, BOSS_MAX)) and g.after_reset(fake_session(PLAYER_MAX, BOSS_MAX)),
+          "RunGuard: one bad reset is tolerated")
+    check(raises(lambda: [g.after_reset(fake_session(PLAYER_MAX * 3, BOSS_MAX)) for _ in range(3)]),
+          "RunGuard: a different player max HP for 3 resets in a row stops the run")
 
     code = train_ablation.main(["--run-dir", os.path.join(root, "dqn", "seed0"), "--no-resize-window"], check_keys=lambda: False)
     check(code == 0, "re-running a DONE run is skipped")

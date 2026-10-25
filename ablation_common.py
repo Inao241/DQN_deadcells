@@ -385,6 +385,116 @@ class GameSession:
         raise RuntimeError("force_end_episode: player did not die within %.0fs" % timeout)
 
 
+# --------------------------------------------------------------------------- run guard
+# Loose sanity ranges (pilot 2026-10-25: player 15482, boss 205k-247k). A value outside them
+# means a pointer chain is reading the wrong thing, e.g. after a game update moved libhl.dll's base.
+PLAYER_HP_RANGE = (500, 1000000)
+BOSS_HP_RANGE = (10000, 10000000)
+
+
+class RunGuard:
+    """Stops a run early instead of logging hours of plausible-looking garbage when HP
+    reading breaks. Every failure raises RuntimeError: the train/eval scripts then save
+    what they have and exit with code 3, and run_experiments.py stops the queue.
+
+    - after_reset():  HP read at the start of each episode must be in range and the
+                      player's max HP must match the run's (or --expect-player-hp); a bad
+                      read is re-read a few times, then `max_bad_resets` bad resets in a
+                      row -> stop (an occasional bad one is tolerated and logged).
+    - preflight:      after the first good reset, poll both HP values for `preflight_s`
+                      with no keys pressed; they must stay inside (1, max].
+    - check_episode(): `max_short_in_row` win/loss episodes in a row shorter than
+                      `short_steps` (death/HP detection broken), or `max_glitches` boss-HP
+                      misreads within the last `glitch_window` episodes -> stop.
+    """
+
+    def __init__(self, expect_player_hp=0, preflight_s=1.0, max_bad_resets=3, short_steps=20,
+                 max_short_in_row=5, glitch_window=10, max_glitches=3):
+        self.expect_player_hp = expect_player_hp or 0
+        self.ref_player = self.expect_player_hp or None
+        self.preflight_s = preflight_s
+        self.preflight_done = preflight_s <= 0
+        self.max_bad_resets = max_bad_resets
+        self.short_steps = short_steps
+        self.max_short_in_row = max_short_in_row
+        self.max_glitches = max_glitches
+        self.bad_resets = 0
+        self.short_in_row = 0
+        self.recent = collections.deque(maxlen=glitch_window)
+
+    def reset_problem(self, player_hp, boss_hp):
+        if not PLAYER_HP_RANGE[0] <= player_hp <= PLAYER_HP_RANGE[1]:
+            return "player HP %s outside %s" % (player_hp, PLAYER_HP_RANGE)
+        if not BOSS_HP_RANGE[0] <= boss_hp <= BOSS_HP_RANGE[1]:
+            return "boss HP %s outside %s" % (boss_hp, BOSS_HP_RANGE)
+        if self.ref_player and abs(player_hp - self.ref_player) > 0.01 * self.ref_player:
+            return ("player max HP %d, expected %d (HP edited or gear changed? every episode of every run "
+                    "must start with the same HP)" % (player_hp, self.ref_player))
+        return None
+
+    def after_reset(self, session, rereads=5):
+        problem = self.reset_problem(session.player_max_hp, session.boss_max_hp)
+        for _ in range(rereads if problem else 0):  # a one-off misread: read again before giving up
+            time.sleep(0.2)
+            session.player_hp, session.boss_hp = session.hp.get_self_hp(), session.hp.get_boss_hp()
+            session.player_max_hp, session.boss_max_hp = max(session.player_hp, 1), max(session.boss_hp, 1)
+            problem = self.reset_problem(session.player_max_hp, session.boss_max_hp)
+            if not problem:
+                break
+        if problem:
+            self.bad_resets += 1
+            print("\nWARNING: suspicious HP after reset (%d/%d): %s" % (self.bad_resets, self.max_bad_resets, problem))
+            if self.bad_resets >= self.max_bad_resets:
+                raise RuntimeError("HP check failed after %d resets in a row: %s. Check the pointer chains "
+                                   "with probe_hp_chains.py" % (self.bad_resets, problem))
+            return False
+        self.bad_resets = 0
+        if self.ref_player is None:
+            self.ref_player = session.player_max_hp
+        if not self.preflight_done:
+            self.preflight(session)
+        return True
+
+    def preflight(self, session, poll_s=0.1):
+        bad = []
+        p = b = None
+        for _ in range(max(1, int(round(self.preflight_s / poll_s)))):
+            p, b = session.hp.get_self_hp(), session.hp.get_boss_hp()
+            if not 1 < p <= 1.01 * session.player_max_hp:
+                bad.append("player %s" % p)
+            if not 1 < b <= 1.01 * session.boss_max_hp:
+                bad.append("boss %s" % b)
+            time.sleep(poll_s)
+        if bad:
+            raise RuntimeError("preflight: HP readings out of range while idle (max player %d, boss %d): %s. "
+                               "Check the pointer chains with probe_hp_chains.py"
+                               % (session.player_max_hp, session.boss_max_hp, ", ".join(bad[:6])))
+        session.player_hp, session.boss_hp = p, b  # the boss may have hit us meanwhile
+        session.state = session.screen.grab()
+        self.preflight_done = True
+        print("preflight OK: player HP %d / %d, boss HP %d / %d" % (p, session.player_max_hp, b, session.boss_max_hp))
+
+    def check_episode(self, outcome, steps):
+        self.recent.append(outcome)
+        if outcome in ("win", "loss") and steps < self.short_steps:
+            self.short_in_row += 1
+        else:
+            self.short_in_row = 0
+        if self.short_in_row >= self.max_short_in_row:
+            raise RuntimeError("%d episodes in a row ended within %d steps - death/win detection looks broken"
+                               % (self.short_in_row, self.short_steps))
+        n_glitch = sum(o == "glitch" for o in self.recent)
+        if n_glitch >= self.max_glitches:
+            raise RuntimeError("%d of the last %d episodes were glitches (boss HP misread)" % (n_glitch, len(self.recent)))
+
+
+def add_guard_args(p):
+    p.add_argument("--expect-player-hp", type=int, default=0,
+                   help="stop if an episode starts with a different player max HP (0 = use the run's first episode)")
+    p.add_argument("--preflight-s", type=float, default=1.0, help="idle HP check after the first reset (0 = off)")
+    p.add_argument("--max-glitches", type=int, default=3, help="stop after this many glitches in 10 episodes")
+
+
 # --------------------------------------------------------------------------- logging
 EPISODE_FIELDS = (
     ["episode", "global_step", "steps", "outcome", "win", "return",

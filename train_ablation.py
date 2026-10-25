@@ -67,6 +67,7 @@ def build_parser():
     p.add_argument("--game-speed", type=float, default=2.0,
                    help="game speed set through speedhack.py (2.0 = what Cheat Engine was doing). "
                         "0 = don't touch the speed. The reset timings in lib/env.py assume 2x.")
+    C.add_guard_args(p)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-resize-window", action="store_true")
     return p
@@ -124,8 +125,11 @@ def main(argv=None, session_factory=None, check_keys=None):
     t_run = time.time()
     print("config:", {k: cfg[k] for k in ("double", "per", "dueling", "seed", "max_steps", "game_speed")})
 
+    guard = C.RunGuard(args.expect_player_hp, args.preflight_s, max_glitches=args.max_glitches)
+
     try:
         session.reset()
+        guard.after_reset(session)
         ep = C.EpisodeStats()
         dmg.new_episode()
         while True:
@@ -183,6 +187,7 @@ def main(argv=None, session_factory=None, check_keys=None):
             writer.add_scalar("episode/return", ep.ret, global_step)
             writer.add_scalar("episode/win", int(res.win), global_step)
             writer.add_scalar("episode/boss_hp_frac_end", session.boss_frac, global_step)
+            guard.check_episode(outcome, ep.steps)
 
             if outcome in ("win", "loss"):
                 recent_returns.append(ep.ret)
@@ -201,6 +206,7 @@ def main(argv=None, session_factory=None, check_keys=None):
                 stop_reason = "budget"
                 break
             session.reset()
+            guard.after_reset(session)
             ep = C.EpisodeStats()
             dmg.new_episode()
 

@@ -1,0 +1,15 @@
+# Windows only (pywin32 / dxcam / keyboard). Tested target: Python 3.11, Anaconda env "DQN".
+# PyTorch must be a CUDA 12.8 build for RTX 50-series (Blackwell) GPUs.
+# Easiest setup: double-click SETUP_env.bat
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch>=2.7
+torchvision
+numpy
+opencv-python
+matplotlib
+pywin32
+pygetwindow
+dxcam
+keyboard
+# train.py / run.py import TensorBoard directly; train_ablation.py works without it
+tensorboard

@@ -51,6 +51,8 @@ def main():
     p.add_argument("--game-speed", type=float, default=2.0, help="0 = don't touch (e.g. using Cheat Engine)")
     p.add_argument("--runs-root", default="runs")
     p.add_argument("--plan", action="store_true", help="print the queue and exit")
+    p.add_argument("--expect-player-hp", type=int, default=0,
+                   help="player max HP every episode must start with, e.g. 15482 (0 = each run checks against its own first episode)")
     p.add_argument("--extra", default="", help='extra args passed to train_ablation.py, e.g. "--damage-frame-prob 0.05"')
     args = p.parse_args()
     os.chdir(os.path.dirname(os.path.abspath(__file__)))  # paths below are relative to this folder
@@ -76,7 +78,8 @@ def main():
         if name == "random":
             if not os.path.exists(os.path.join(d, "EVAL_DONE")):
                 code = run([py, "evaluate.py", "--random", "--run-dir", d, "--seed", str(seed),
-                            "--episodes", str(args.eval_episodes), "--game-speed", str(args.game_speed)], args.runs_root)
+                            "--episodes", str(args.eval_episodes), "--game-speed", str(args.game_speed),
+                            "--expect-player-hp", str(args.expect_player_hp)], args.runs_root)
                 if code != 0:
                     log("stopping queue", args.runs_root)
                     return code
@@ -85,14 +88,16 @@ def main():
             double, per, dueling = flags
             cmd = [py, "train_ablation.py", "--run-dir", d, "--seed", str(seed),
                    "--double", str(double), "--per", str(per), "--dueling", str(dueling),
-                   "--max-steps", str(args.max_steps), "--game-speed", str(args.game_speed)] + args.extra.split()
+                   "--max-steps", str(args.max_steps), "--game-speed", str(args.game_speed),
+                   "--expect-player-hp", str(args.expect_player_hp)] + args.extra.split()
             code = run(cmd, args.runs_root)
             if code != 0:
                 log("stopping queue (fix the game, then re-run the same command)", args.runs_root)
                 return code
         if not os.path.exists(os.path.join(d, "EVAL_DONE")):
             code = run([py, "evaluate.py", "--run-dir", d, "--episodes", str(args.eval_episodes),
-                        "--game-speed", str(args.game_speed)], args.runs_root)
+                        "--game-speed", str(args.game_speed), "--expect-player-hp", str(args.expect_player_hp)],
+                       args.runs_root)
             if code != 0:
                 log("stopping queue", args.runs_root)
                 return code
