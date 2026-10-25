@@ -109,6 +109,10 @@ def install_fakes():
     pg = types.ModuleType("pygetwindow")
     pg.getWindowsWithTitle = lambda t: [types.SimpleNamespace(size=None)]
     sys.modules["pygetwindow"] = pg
+    sh = types.ModuleType("speedhack")
+    sh.calls = []
+    sh.set_speed = lambda v, pid=None: sh.calls.append(v)
+    sys.modules["speedhack"] = sh
     time.sleep = lambda s: None  # the real reset sequence sleeps ~20 s
 
 
@@ -201,6 +205,11 @@ def main():
                          "--capacity", "100", "--batch-size", "8"], check_keys=lambda: False)
     moved = [x for x in os.listdir(os.path.join(root, "partial")) if "_incomplete_" in x]
     check(len(moved) == 1, "an unfinished run folder is moved aside, not mixed")
+    check(sys.modules["speedhack"].calls and set(sys.modules["speedhack"].calls) == {2.0},
+          "training sets the game speed to 2x through speedhack.py")
+    import json as _json
+    check(_json.load(open(os.path.join(root, "dqn", "seed0", "config.json")))["game_speed"] == 2.0,
+          "game speed recorded in config.json")
 
     print("\n[4] evaluate every config + random baseline")
     for name in CONFIGS:

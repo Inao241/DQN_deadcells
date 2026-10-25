@@ -60,6 +60,9 @@ def build_parser():
     p.add_argument("--damage-frame-prob", type=float, default=0.0,
                    help="probability of saving frames for a non-fatal hit during training "
                         "(fatal hits are always saved when > 0). Evaluation saves all.")
+    p.add_argument("--game-speed", type=float, default=2.0,
+                   help="game speed set through speedhack.py (2.0 = what Cheat Engine was doing). "
+                        "0 = don't touch the speed. The reset timings in lib/env.py assume 2x.")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-resize-window", action="store_true")
     return p
@@ -99,13 +102,13 @@ def main(argv=None, session_factory=None, check_keys=None):
     dmg = C.DamageRecorder(run_dir, "damage_events.csv", frame_prob=args.damage_frame_prob, prefix="train_")
     check_keys = check_keys or C.check_pause_or_quit
 
-    session = (session_factory or (lambda: C.GameSession(resize_window=not args.no_resize_window)))()
+    session = (session_factory or (lambda: C.GameSession(resize_window=not args.no_resize_window, game_speed=args.game_speed)))()
 
     global_step, episode = 0, 0
     best_mean, recent_returns = None, []
     exit_code, stop_reason = EXIT_OK, None
     t_run = time.time()
-    print("config:", {k: cfg[k] for k in ("double", "per", "dueling", "seed", "max_steps")})
+    print("config:", {k: cfg[k] for k in ("double", "per", "dueling", "seed", "max_steps", "game_speed")})
 
     try:
         session.reset()

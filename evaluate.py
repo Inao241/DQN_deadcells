@@ -35,6 +35,8 @@ def build_parser():
     p.add_argument("--max-episode-steps", type=int, default=5000)
     p.add_argument("--human-poll-s", type=float, default=0.1)
     p.add_argument("--no-frames", action="store_true", help="do not save damage frames")
+    p.add_argument("--game-speed", type=float, default=None,
+                   help="default: the speed the run was trained at (2.0 for --random), 1.0 for --human; 0 = don't touch")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--no-resize-window", action="store_true")
     return p
@@ -91,6 +93,8 @@ def main(argv=None, session_factory=None, check_keys=None):
         learner.load(os.path.join(args.run_dir, args.checkpoint))
         learner.action_net.eval()
         learner.move_net.eval()
+    if args.game_speed is None:
+        args.game_speed = 1.0 if agent_kind == "human" else (cfg.get("game_speed", 2.0) if learner else 2.0)
 
     for name in ("eval.csv", "eval_damage_events.csv", "EVAL_DONE"):  # fresh eval each time
         path = os.path.join(args.run_dir, name)
@@ -100,7 +104,7 @@ def main(argv=None, session_factory=None, check_keys=None):
     ep_log = C.CsvLogger(os.path.join(args.run_dir, "eval.csv"), ["agent", "checkpoint"] + C.EPISODE_FIELDS)
     dmg = C.DamageRecorder(args.run_dir, "eval_damage_events.csv",
                            frame_prob=0.0 if args.no_frames else 1.0, prefix="eval_")
-    session = (session_factory or (lambda: C.GameSession(resize_window=not args.no_resize_window)))()
+    session = (session_factory or (lambda: C.GameSession(resize_window=not args.no_resize_window, game_speed=args.game_speed)))()
     if agent_kind == "human":
         session = _HumanSession(session, args.human_poll_s)
 
@@ -140,7 +144,7 @@ def main(argv=None, session_factory=None, check_keys=None):
             if glitch or truncated:
                 session.force_end_episode()
         C.write_json(os.path.join(args.run_dir, "EVAL_DONE"),
-                     dict(episodes=args.episodes, wins=wins, agent=agent_kind))
+                     dict(episodes=args.episodes, wins=wins, agent=agent_kind, game_speed=args.game_speed))
     except KeyboardInterrupt:
         print("\nevaluation stopped by user")
         code = 2

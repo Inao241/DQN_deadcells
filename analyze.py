@@ -212,6 +212,17 @@ def main():
         if tot.sum():
             lines.append("| %s | " % pretty(name) + " | ".join("%.1f" % v for v in 100 * tot / tot.sum()) + " |")
 
+    speeds = set()
+    for name, dirs in runs:
+        for d in dirs:
+            for fn, key in (("config.json", "game_speed"), ("EVAL_DONE", "game_speed")):
+                fp = os.path.join(d, fn)
+                if os.path.exists(fp):
+                    v = json.load(open(fp)).get(key)
+                    if v is not None:
+                        speeds.add(float(v))
+    lines.insert(2, "Game speed used (train/eval): %s. " % (", ".join("%.2gx" % v for v in sorted(speeds)) or "unknown")
+                 + ("**Warning: mixed speeds.** " if len(speeds - {1.0}) > 1 else ""))
     with open(os.path.join(args.out, "results.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     with open(os.path.join(args.out, "results_table.csv"), "w", newline="") as f:

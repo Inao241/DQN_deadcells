@@ -11,6 +11,7 @@ New files (the original `train.py` / `run.py` are untouched):
 | `analyze.py` | results table (+ LaTeX), learning curves, bootstrap CIs, Glass's δ, latency, compute cost |
 | `analyze_damage.py` | what the agent was doing when hit, which boss attack hit it, cause of death |
 | `selftest.py` | checks the whole pipeline with a fake game, no Dead Cells needed |
+| `speedhack.py` + `speedhack_dll/` | runs the game at 2x without Cheat Engine (see below) |
 
 `model.py`: added `dueling=True/False` (default True, old checkpoints still load).
 Extra Python packages for the analysis: `matplotlib` (everything else is already used by the project).
@@ -18,8 +19,29 @@ Extra Python packages for the analysis: `matplotlib` (everything else is already
 ## 0. Self-test (once, ~2 min)
     python selftest.py
 
+## Game speed without Cheat Engine
+Training/evaluation set the game to 2x automatically (`--game-speed 2`, recorded in
+`config.json`). By hand:
+
+    python speedhack.py 2     # 2x
+    python speedhack.py 1     # normal
+    python speedhack.py       # show status
+
+It loads `speedhack_dll/dqn_speedhack32.dll` (or `...64.dll`) into the game and scales the
+clocks the game reads (`QueryPerformanceCounter`, `GetTickCount(64)`, `timeGetTime`), like
+Cheat Engine does. The speed stays until you change it or restart the game. Don't use Cheat
+Engine's speedhack at the same time. If you still want Cheat Engine, pass `--game-speed 0`.
+Rebuild the DLLs with `speedhack_dll/build.sh` (needs `pip install ziglang`).
+
+`lib/env.py`'s reset timings were tuned at 2x, so keep training at 2x.
+For the paper: game speed changes the agent's effective reaction time
+(a 100 ms control step = 200 ms of game time at 2x). Report it.
+
+**First time:** start the game, run `python speedhack.py 2`, and check by eye that the game is
+running 2x (e.g. compare the in-game run timer with a stopwatch).
+
 ## 1. Pilot: measure speed (~20 min)
-Game open at 2x speed, standing in front of the boss door, then:
+Game open, standing in front of the boss door (no Cheat Engine needed), then:
 
     python train_ablation.py --run-dir runs_pilot/speed --max-steps 3000
 
@@ -41,7 +63,7 @@ Optional 2x2 Dueling ablation: add `--configs dqn double double_per double_dueli
 ## 3. Human baseline (optional, ~30 min)
     python evaluate.py --human --run-dir runs/human/me --episodes 20
 
-You play; the script only records HP and hits.
+You play (at normal 1x speed by default); the script only records HP and hits.
 
 ## 4. Analysis
     python analyze.py          # -> analysis/results.md, results_table.tex, fig_*.png

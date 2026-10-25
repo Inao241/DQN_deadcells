@@ -275,9 +275,13 @@ class GameSession:
     """Thin wrapper around the original env/screen/HP code that adds timing
     and damage bookkeeping. Game logic and reward are unchanged."""
 
-    def __init__(self, resize_window=True):
+    def __init__(self, resize_window=True, game_speed=None):
         from lib import GetScreen, Actions, env, GetHp  # imported here so the self-test can mock them
         self.Actions = Actions
+        if game_speed:  # None/0 = leave the game speed alone (e.g. if you still use Cheat Engine)
+            import speedhack
+            speedhack.set_speed(game_speed)
+            print("game speed: %.2fx" % game_speed)
         if resize_window:
             import pygetwindow
             win = pygetwindow.getWindowsWithTitle("Dead Cells")[0]
