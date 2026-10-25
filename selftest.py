@@ -8,6 +8,10 @@ few hundred steps on your GPU, evaluates, runs both analysis scripts, and
 prints PASS / FAIL. Output goes to selftest_runs/ and selftest_analysis/
 (delete them afterwards).
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import math
 import os
 import random
@@ -107,7 +111,7 @@ def install_fakes():
     kb.is_pressed = lambda k: False
     sys.modules["keyboard"] = kb
     pg = types.ModuleType("pygetwindow")
-    pg.getWindowsWithTitle = lambda t: [types.SimpleNamespace(size=None)]
+    pg.getWindowsWithTitle = lambda t: [types.SimpleNamespace(size=None, title="Dead Cells")]
     sys.modules["pygetwindow"] = pg
     sh = types.ModuleType("speedhack")
     sh.calls = []

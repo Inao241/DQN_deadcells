@@ -10,6 +10,10 @@ Writes into --run-dir:
     damage_frames/eval_*.png frames before/after every hit (for the damage analysis)
     EVAL_DONE
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import argparse
 import json
 import os

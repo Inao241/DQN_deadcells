@@ -7,6 +7,10 @@ Everything game-specific is still done by the original lib/ modules
   - per-episode CSV logging with latency breakdown
   - per-hit damage-event logging (+ optional frame snapshots)
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import collections
 import csv
 import json
@@ -237,7 +241,7 @@ class Learner:
         buffer.update_priorities("action", ia, td_a)
         self._soft_update()
         self.updates += 1
-        return dict(loss_move=float(loss_m), loss_action=float(loss_a),
+        return dict(loss_move=loss_m.item(), loss_action=loss_a.item(),
                     td_move=float(td_m.mean()), td_action=float(td_a.mean()))
 
     @torch.no_grad()
@@ -284,8 +288,13 @@ class GameSession:
             print("game speed: %.2fx" % game_speed)
         if resize_window:
             import pygetwindow
-            win = pygetwindow.getWindowsWithTitle("Dead Cells")[0]
-            win.size = (960, 540)
+            # exact title: getWindowsWithTitle() matches substrings and can pick
+            # the "...\Dead Cells\deadcells.exe" console window instead
+            wins = [w for w in pygetwindow.getWindowsWithTitle("Dead Cells") if w.title.strip().lower() == "dead cells"]
+            if not wins:
+                raise RuntimeError("Dead Cells window not found - is the game running?")
+            wins[0].size = (960, 540)
+            time.sleep(0.5)
         self.screen = GetScreen.GetScreen()
         self.env = env.env()
         self.hp = GetHp.Hp_getter()

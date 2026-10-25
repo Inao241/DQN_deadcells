@@ -7,3 +7,5 @@ runs/**/*.pt
 runs/**/damage_frames/
 runs/**/tb/
 checkpoints/buffer.pickle
+test_logs/
+health_address/

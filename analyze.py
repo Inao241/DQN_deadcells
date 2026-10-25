@@ -10,6 +10,10 @@ Outputs (analysis/):
     fig_learning_win.png / fig_learning_bosshp.png / fig_learning_return.png
     fig_eval_summary.png
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import argparse
 import csv
 import glob

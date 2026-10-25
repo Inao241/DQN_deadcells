@@ -18,6 +18,10 @@ Outputs (analysis/): damage_report.md, fig_damage_hist.png,
 fig_hit_agent_action.png, fig_hit_boss_attack.png, damage_clusters/*.png,
 attack_labels.json
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import argparse
 import collections
 import glob

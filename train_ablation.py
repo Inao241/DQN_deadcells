@@ -14,6 +14,10 @@ Outputs in --run-dir:
 
 Keys while running: q = stop (exit code 2), p = pause/resume.
 """
+# Anaconda numpy (MKL) and PyTorch each ship libiomp5md.dll; without this the process aborts with "OMP: Error #15"
+import os as _os
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 import argparse
 import os
 import random
@@ -93,8 +97,18 @@ def main(argv=None, session_factory=None, check_keys=None):
     C.write_json(os.path.join(run_dir, "config.json"), cfg)
     device = args.device
 
-    from torch.utils.tensorboard import SummaryWriter
-    writer = SummaryWriter(log_dir=os.path.join(run_dir, "tb"))
+    try:
+        from torch.utils.tensorboard import SummaryWriter
+        writer = SummaryWriter(log_dir=os.path.join(run_dir, "tb"))
+    except Exception:  # tensorboard not installed (or broken): everything important is in the CSVs anyway
+        class _NoWriter:
+            def add_scalar(self, *a, **k):
+                pass
+
+            def close(self):
+                pass
+        writer = _NoWriter()
+        print("(tensorboard not installed - skipping TensorBoard logs, CSV logs are unaffected)")
 
     learner = C.Learner(cfg, device)
     buffer = C.ReplayBuffer(args.capacity, bool(args.per), args.alpha, args.min_prob, device)
